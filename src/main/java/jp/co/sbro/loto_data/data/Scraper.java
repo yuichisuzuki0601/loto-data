@@ -117,7 +117,9 @@ public class Scraper {
 				}
 				nohitFlg = !nohitFlg;
 			} else if (contains(text, "口")) {
-				prize = result.addPrize(Integer.parseInt(removeStr(text, ",", "口")));
+				if (!contains(text, "数")) {
+					prize = result.addPrize(Integer.parseInt(removeStr(text, ",", "口")));
+				}
 			} else if (contains(text, "円")) {
 				if (performanceFlg) {
 					performanceFlg = false;
