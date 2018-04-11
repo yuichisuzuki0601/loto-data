@@ -7,7 +7,7 @@ public class Sample {
 	public static void main(String[] args) throws Exception {
 
 		// スクレイピングの開始
-		Scraper scraper = new Scraper();
+		Scraper scraper = new Scraper(1200);
 
 		// リポジトリの取得
 		WinResultRepository repos = scraper.getWinResultRepository();

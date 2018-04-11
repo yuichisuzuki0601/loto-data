@@ -1,9 +1,12 @@
 package jp.co.sbro.loto_data.data;
 
 import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.util.Calendar;
+import java.util.Date;
+import java.util.Locale;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -14,40 +17,47 @@ import jp.co.sbro.loto_data.data.WinResult.Prize;
 
 public class Scraper {
 
-	private final static String MAIN_URL = "https://www.mizuhobank.co.jp/takarakuji/loto/";
-	private final static String RECENT_URL = MAIN_URL + "loto6/index.html";
-	private final static String LAST_YEAR_URL = MAIN_URL + "backnumber/lt6-#yearMonth#.html";
-	private final static String PAST_URL = MAIN_URL + "backnumber/loto6#time#.html";
+	private final static String BASE_URL = "https://www.mizuhobank.co.jp/retail/takarakuji/loto/";
+	private final static String PAST_URL = BASE_URL + "backnumber/loto6#time#.html";
+	private final static String MAIN_URL = BASE_URL + "loto6/csv/A102#time#.CSV?#date#";
 
 	private final static SimpleDateFormat SDF = new SimpleDateFormat("yyyy年MM月dd日");
+	private final static SimpleDateFormat JSDF = new SimpleDateFormat("GGGGy年M月d日", new Locale("ja", "JP", "JP"));
 
 	private final WinResultRepository repos;
 
 	public Scraper() throws Exception {
-		this.repos = scrape();
+		this(1);
+	}
+
+	public Scraper(int time) throws Exception {
+		this.repos = scrape(time);
 	}
 
 	public WinResultRepository getWinResultRepository() {
 		return repos;
 	}
 
-	private WinResultRepository scrape() throws Exception {
+	private WinResultRepository scrape(int fromTime) throws Exception {
 		WinResultRepository repos = new WinResultRepository();
 
-		// 過去の結果
-		for (int i = 1; i <= 99999; i += 20) {
-			try {
+		// 結果の取得(460回目まで)
+		for (int i = 1; i <= 441; i += 20) {
+			if (i >= fromTime) {
 				repos.merge(scrapePastResults(i));
-			} catch (IOException e) {
-				break;
 			}
 		}
 
-		// 過去一年間の結果
-		repos.merge(scrapeLastYearResults());
-
-		// 最新の結果
-		repos.merge(scrapeResults(RECENT_URL));
+		// 結果の取得(461回目以降)
+		for (int i = 461; i <= 99999; i++) {
+			if (i >= fromTime) {
+				try {
+					repos.merge(scrapeResults(i));
+				} catch (IOException e) {
+					break;
+				}
+			}
+		}
 
 		return repos;
 	}
@@ -59,7 +69,13 @@ public class Scraper {
 		Elements elms = document.select("tbody > tr");
 		for (Element elm : elms) {
 			String[] data = elm.text().split(" ");
-			int time = Integer.parseInt(removeStr(data[0], "第", "回"));
+			int time = 0;
+			try {
+				time = Integer.parseInt(removeStr(data[0], "第", "回"));
+			} catch (NumberFormatException e) {
+				// パース出来ない = 不要なタグ
+				continue;
+			}
 			WinResult result = new WinResult(time);
 			result.setDate(SDF.parse(data[1]));
 			for (int i = 1; i <= 6; ++i) {
@@ -71,68 +87,38 @@ public class Scraper {
 		return repos;
 	}
 
-	private WinResultRepository scrapeLastYearResults() throws Exception {
+	private WinResultRepository scrapeResults(int timeUrl) throws MalformedURLException, IOException, ParseException {
 		WinResultRepository repos = new WinResultRepository();
-		Calendar c = Calendar.getInstance();
-		// 毎月1日の午前中はまだページができてないので対応
-		int day = c.get(Calendar.DAY_OF_MONTH);
-		int hour = c.get(Calendar.HOUR);
-		if (day == 1 && (0 <= hour && hour <= 12)) {
-			c.add(Calendar.MONTH, -1);
-		}
-		c.add(Calendar.YEAR, -1);
-		SimpleDateFormat sdf = new SimpleDateFormat("yyyyMM");
-		for (int i = 1; i <= 12; ++i) {
-			String url = LAST_YEAR_URL.replaceAll("#yearMonth#", sdf.format(c.getTime()));
-			repos.merge(scrapeResults(url));
-			c.add(Calendar.MONTH, 1);
-		}
-		return repos;
-	}
+		String url = MAIN_URL.replace("#time#", String.format("%04d", timeUrl));
+		url = url.replace("#date#", String.valueOf(new Date().getTime()));
+		Document document = Jsoup.parse(new URL(url).openStream(), "SJIS", url);
+		String[] lines = document.body().toString().split(" ");
 
-	private WinResultRepository scrapeResults(String url) throws Exception {
-		WinResultRepository repos = new WinResultRepository();
-		Document document = Jsoup.connect(url).get();
-		Elements elms = document.select("th, td");
 		WinResult result = null;
-		boolean nohitFlg = false;
-		boolean performanceFlg = false;
-		boolean carryOverFlg = false;
-		Prize prize = null;
-		for (Element elm : elms) {
-			String text = elm.text();
-			if (contains(text, "第", "回")) {
-				int time = Integer.parseInt(removeStr(text, "第", "回"));
+		for (String line : lines) {
+			if (contains(line, "第", "回ロト６")) {
+				String[] datas = line.split(",");
+				int time = Integer.parseInt(removeStr(datas[0], "第", "回ロト６"));
 				result = new WinResult(time);
 				repos.put(time, result);
-			} else if (contains(text, "年", "月", "日")) {
-				result.setDate(SDF.parse(text));
-			} else if (isNumber(text)) {
-				result.addHits(Integer.parseInt(text));
-			} else if (contains(text, "(", ")")) {
-				result.setBonus(Integer.parseInt(removeStr(text, "\\(", "\\)")));
-			} else if (contains(text, "該当なし")) {
-				if (!nohitFlg) {
+				result.setDate(JSDF.parse(datas[2]));
+			} else if (contains(line, "本数字", "ボーナス数字") && !contains(line, "個")) {
+				String[] datas = line.split(",");
+				for (int i = 1; i <= 6; ++i) {
+					result.addHits(Integer.parseInt(datas[i]));
+				}
+				result.setBonus(Integer.parseInt(datas[8]));
+			} else if (contains(line, "等", "該当なし") || contains(line, "等", "口", "円")) {
+				Prize prize = null;
+				if (contains(line, "等", "該当なし")) {
 					prize = result.addPrize(0);
-				}
-				nohitFlg = !nohitFlg;
-			} else if (contains(text, "口")) {
-				if (!contains(text, "数")) {
-					prize = result.addPrize(Integer.parseInt(removeStr(text, ",", "口")));
-				}
-			} else if (contains(text, "円")) {
-				if (performanceFlg) {
-					performanceFlg = false;
-				} else if (carryOverFlg) {
-					result.setCarryOver(Integer.parseInt(removeStr(text, ",", "円")));
-					carryOverFlg = false;
 				} else {
-					prize.setPrice(Integer.parseInt(removeStr(text, ",", "円")));
+					String[] datas = line.split(",");
+					prize = result.addPrize(Integer.parseInt(removeStr(datas[1], "口")));
+					prize.setPrice(Integer.parseInt(removeStr(datas[2], "円")));
 				}
-			} else if (contains(text, "販売実績額")) {
-				performanceFlg = true;
-			} else if (contains(text, "キャリーオーバー")) {
-				carryOverFlg = true;
+			} else if (contains(line, "キャリーオーバー")) {
+				result.setCarryOver(Integer.parseInt(removeStr(line.split(",")[1], "円")));
 			}
 		}
 		return repos;
@@ -157,6 +143,7 @@ public class Scraper {
 		return result.trim();
 	}
 
+	@SuppressWarnings("unused")
 	private boolean isNumber(String num) {
 		try {
 			Integer.parseInt(num);
