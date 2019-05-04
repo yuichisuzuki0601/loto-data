@@ -6,7 +6,6 @@ import java.net.URL;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.Locale;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -22,7 +21,7 @@ public class Scraper {
 	private final static String MAIN_URL = BASE_URL + "loto6/csv/A102#time#.CSV?#date#";
 
 	private final static SimpleDateFormat SDF = new SimpleDateFormat("yyyy年MM月dd日");
-	private final static SimpleDateFormat JSDF = new SimpleDateFormat("GGGGy年M月d日", new Locale("ja", "JP", "JP"));
+	//private final static SimpleDateFormat JSDF = new SimpleDateFormat("GGGGy年M月d日", new Locale("ja", "JP", "JP"));
 
 	private final WinResultRepository repos;
 
@@ -101,7 +100,21 @@ public class Scraper {
 				int time = Integer.parseInt(removeStr(datas[0], "第", "回ロト６"));
 				result = new WinResult(time);
 				repos.put(time, result);
-				result.setDate(JSDF.parse(datas[2]));
+				String christian = "";
+				if (datas[2].startsWith("平成")) {
+					String str = datas[2].replaceAll("平成", "");
+					String[] splited = str.split("年");
+					int jpYear = Integer.parseInt(splited[0]);
+					int year = 1988 + jpYear;
+					christian = year + "年" + splited[1];
+				} else if (datas[2].startsWith("令和")) {
+					String str = datas[2].replaceAll("令和", "");
+					String[] splited = str.split("年");
+					int jpYear = Integer.parseInt(splited[0]);
+					int year = 2018 + jpYear;
+					christian = year + "年" + splited[1];
+				}
+				result.setDate(SDF.parse(christian));
 			} else if (contains(line, "本数字", "ボーナス数字") && !contains(line, "個")) {
 				String[] datas = line.split(",");
 				for (int i = 1; i <= 6; ++i) {
